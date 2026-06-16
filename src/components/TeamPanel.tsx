@@ -40,7 +40,7 @@ const TeamPanel: React.FC<Props> = ({ teams, activeTeam, onSelect }) => {
       </div>
       {teams.map((team) => {
         const isActive = activeTeam === team.name
-        const status = getStatusClass(team.avgProgress)
+        const status = getStatusClass(team.totalProgress)
 
         return (
           <div
@@ -60,12 +60,12 @@ const TeamPanel: React.FC<Props> = ({ teams, activeTeam, onSelect }) => {
                 <span className="team-stat-value">{team.floorCount}层</span>
               </div>
               <div className="team-stat">
-                <span className="team-stat-label">平均进度</span>
+                <span className="team-stat-label">总进度</span>
                 <span
                   className="team-stat-value"
-                  style={{ color: getProgressColor(team.avgProgress) }}
+                  style={{ color: getProgressColor(team.totalProgress) }}
                 >
-                  {team.avgProgress}%
+                  {team.totalProgress}%
                 </span>
               </div>
             </div>
@@ -73,8 +73,8 @@ const TeamPanel: React.FC<Props> = ({ teams, activeTeam, onSelect }) => {
               <div
                 className="team-progress-bar-fill"
                 style={{
-                  width: `${team.avgProgress}%`,
-                  background: getProgressColor(team.avgProgress),
+                  width: `${team.totalProgress}%`,
+                  background: getProgressColor(team.totalProgress),
                 }}
               />
             </div>

@@ -18,7 +18,7 @@ export interface TeamSummary {
   name: string
   floorCount: number
   floorIndices: number[]
-  avgProgress: number
+  totalProgress: number
 }
 
 export interface DaySnapshot {
@@ -101,19 +101,19 @@ export function getOverallProgress(snapshot: DaySnapshot): number {
 }
 
 export function getTeamSummaries(snapshot: DaySnapshot): TeamSummary[] {
-  const teamMap = new Map<string, { floorIndices: number[]; totalProgress: number }>()
+  const teamMap = new Map<string, { floorIndices: number[]; progressSum: number }>()
 
   snapshot.floors.forEach((floor, index) => {
     const teamName = floor.team
     const avg = getFloorAvgProgress(floor)
 
     if (!teamMap.has(teamName)) {
-      teamMap.set(teamName, { floorIndices: [], totalProgress: 0 })
+      teamMap.set(teamName, { floorIndices: [], progressSum: 0 })
     }
 
     const entry = teamMap.get(teamName)!
     entry.floorIndices.push(index)
-    entry.totalProgress += avg
+    entry.progressSum += avg
   })
 
   const summaries: TeamSummary[] = []
@@ -122,11 +122,11 @@ export function getTeamSummaries(snapshot: DaySnapshot): TeamSummary[] {
       name,
       floorCount: value.floorIndices.length,
       floorIndices: value.floorIndices,
-      avgProgress: Math.round(value.totalProgress / value.floorIndices.length),
+      totalProgress: Math.round(value.progressSum / value.floorIndices.length),
     })
   })
 
-  summaries.sort((a, b) => b.avgProgress - a.avgProgress)
+  summaries.sort((a, b) => b.totalProgress - a.totalProgress)
 
   return summaries
 }
