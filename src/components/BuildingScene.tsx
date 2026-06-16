@@ -1,6 +1,6 @@
-import React, { useRef, useState, useCallback, useMemo } from 'react'
+import React, { useRef, useCallback, useMemo, useEffect } from 'react'
 import * as THREE from 'three'
-import { Canvas, useFrame, useThree } from '@react-three/fiber'
+import { Canvas, useFrame } from '@react-three/fiber'
 import { OrbitControls, Environment } from '@react-three/drei'
 import { DaySnapshot, getFloorStatus, getFloorAvgProgress, FloorData } from '../data/constructionData'
 
@@ -15,28 +15,56 @@ const FLOOR_COLORS: Record<string, string> = {
   pending: '#64748b',
 }
 
-// ---------- 飞行动画 Hook ----------
-function useFlyCamera() {
-  const { camera } = useThree()
-  const targetRef = useRef(new THREE.Vector3(0, 4, 14))
-  const lookRef = useRef(new THREE.Vector3(0, 4, 0))
-  const active = useRef(false)
+// ---------- 飞行动画 ----------
+function createFlyToAnimation(
+  cameraRef: React.MutableRefObject<THREE.PerspectiveCamera | null>,
+  controlsRef: React.MutableRefObject<any>
+) {
+  let active = false
+  let animationId: number | null = null
 
-  const flyTo = useCallback((floorIndex: number) => {
+  const flyTo = (floorIndex: number) => {
+    if (!cameraRef.current) return
+    const camera = cameraRef.current
     const y = floorIndex * (FLOOR_H + GAP) + FLOOR_H / 2 + 1.5
-    targetRef.current.set(5, y, 8)
-    lookRef.current.set(0, y - 0.5, 0)
-    active.current = true
-  }, [])
+    const targetPos = new THREE.Vector3(5, y, 8)
+    const targetLook = new THREE.Vector3(0, y - 0.5, 0)
 
-  useFrame(() => {
-    if (!active.current) return
-    camera.position.lerp(targetRef.current, 0.04)
-    const d = camera.position.distanceTo(targetRef.current)
-    if (d < 0.05) active.current = false
-  })
+    active = true
 
-  return flyTo
+    const animate = () => {
+      if (!active || !cameraRef.current) return
+      const cam = cameraRef.current
+
+      cam.position.lerp(targetPos, 0.04)
+
+      if (controlsRef.current && controlsRef.current.target) {
+        controlsRef.current.target.lerp(targetLook, 0.04)
+        controlsRef.current.update()
+      }
+
+      const d = cam.position.distanceTo(targetPos)
+      if (d < 0.05) {
+        active = false
+        return
+      }
+
+      animationId = requestAnimationFrame(animate)
+    }
+
+    if (animationId) cancelAnimationFrame(animationId)
+    animate()
+  }
+
+  const dispose = () => {
+    active = false
+    if (animationId) {
+      cancelAnimationFrame(animationId)
+      animationId = null
+    }
+  }
+
+  return { flyTo, dispose }
 }
 
 // ---------- 单层楼模型 ----------
@@ -45,13 +73,15 @@ interface FloorMeshProps {
   index: number
   snapshot: DaySnapshot
   hovered: number | null
+  highlighted: boolean
+  dimmed: boolean
   setHovered: (v: number | null) => void
   setTooltipData: (v: { x: number; y: number; floor: FloorData } | null) => void
   flyTo: (idx: number) => void
   cameraRef: React.MutableRefObject<THREE.PerspectiveCamera | null>
 }
 
-function FloorMesh({ floor, index, snapshot, hovered, setHovered, setTooltipData, flyTo, cameraRef }: FloorMeshProps) {
+function FloorMesh({ floor, index, snapshot, hovered, highlighted, dimmed, setHovered, setTooltipData, flyTo, cameraRef }: FloorMeshProps) {
   const meshRef = useRef<THREE.Mesh>(null!)
   const status = getFloorStatus(floor)
   const color = FLOOR_COLORS[status]
@@ -60,7 +90,7 @@ function FloorMesh({ floor, index, snapshot, hovered, setHovered, setTooltipData
 
   useFrame(() => {
     if (!meshRef.current) return
-    const target = isHovered ? 1.06 : 1
+    const target = isHovered || highlighted ? 1.06 : 1
     meshRef.current.scale.x = THREE.MathUtils.lerp(meshRef.current.scale.x, target, 0.1)
     meshRef.current.scale.z = THREE.MathUtils.lerp(meshRef.current.scale.z, target, 0.1)
   })
@@ -101,7 +131,9 @@ function FloorMesh({ floor, index, snapshot, hovered, setHovered, setTooltipData
           roughness={0.55}
           metalness={0.1}
           transparent
-          opacity={isHovered ? 0.95 : 0.85}
+          opacity={highlighted ? 1 : isHovered ? 0.95 : dimmed ? 0.25 : 0.85}
+          emissive={highlighted ? color : '#000000'}
+          emissiveIntensity={highlighted ? 0.3 : 0}
         />
       </mesh>
       {/* 顶部装饰条 */}
@@ -164,22 +196,37 @@ interface SceneProps {
   setHovered: (v: number | null) => void
   setTooltipData: (v: { x: number; y: number; floor: FloorData } | null) => void
   focusFloor: number | null
+  highlightFloorIndices: number[]
 }
 
-function Scene({ snapshot, hovered, setHovered, setTooltipData, focusFloor }: SceneProps) {
-  const flyTo = useFlyCamera()
+function Scene({ snapshot, hovered, setHovered, setTooltipData, focusFloor, highlightFloorIndices }: SceneProps) {
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null)
+  const controlsRef = useRef<any>(null)
+  const flyToRef = useRef<((idx: number) => void) | null>(null)
+  const hasHighlight = highlightFloorIndices.length > 0
 
   const handleCreated = useCallback((state: { camera: THREE.Camera }) => {
     cameraRef.current = state.camera as THREE.PerspectiveCamera
   }, [])
 
+  useEffect(() => {
+    const { flyTo, dispose } = createFlyToAnimation(cameraRef, controlsRef)
+    flyToRef.current = flyTo
+    return dispose
+  }, [])
+
   // 当 focusFloor 变化时触发飞行
-  React.useEffect(() => {
-    if (focusFloor !== null) {
-      flyTo(focusFloor)
+  useEffect(() => {
+    if (focusFloor !== null && flyToRef.current) {
+      flyToRef.current(focusFloor)
     }
-  }, [focusFloor, flyTo])
+  }, [focusFloor])
+
+  const handleFloorClick = useCallback((index: number) => {
+    if (flyToRef.current) {
+      flyToRef.current(index)
+    }
+  }, [])
 
   return (
     <Canvas
@@ -205,14 +252,17 @@ function Scene({ snapshot, hovered, setHovered, setTooltipData, focusFloor }: Sc
           index={i}
           snapshot={snapshot}
           hovered={hovered}
+          highlighted={highlightFloorIndices.includes(i)}
+          dimmed={hasHighlight && !highlightFloorIndices.includes(i)}
           setHovered={setHovered}
           setTooltipData={setTooltipData}
-          flyTo={flyTo}
+          flyTo={handleFloorClick}
           cameraRef={cameraRef}
         />
       ))}
 
       <OrbitControls
+        ref={controlsRef}
         makeDefault
         enablePan={true}
         enableDamping
